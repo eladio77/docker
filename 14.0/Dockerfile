@@ -17,6 +17,7 @@ RUN apt-get update && \
         libssl-dev \
         node-less \
         npm \
+	rustc \
         python3-num2words \
         python3-pdfminer \
         python3-pip \
@@ -31,6 +32,22 @@ RUN apt-get update && \
         python3-xlrd \
         python3-xlwt \
         xz-utils \
+        git \
+        python3-venv \
+        libpq-dev \
+        python3-pypdf2 \
+        wget \
+        build-essential \
+        python3-dev  \
+        python3-wheel \
+        libxslt1-dev \
+        libzip-dev \
+        libldap2-dev \
+        libsasl2-dev \
+        python3-setuptools \
+        libpng-tools \
+        libjpeg-dev \
+        gdebi \
     && curl -o wkhtmltox.deb -sSL https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.buster_amd64.deb \
     && echo 'ea8277df4297afc507c61122f3c349af142f31e5 wkhtmltox.deb' | sha1sum -c - \
     && apt-get install -y --no-install-recommends ./wkhtmltox.deb \
@@ -53,32 +70,47 @@ RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ buster-pgdg main' > /etc/
 # Install rtlcss (on Debian buster)
 RUN npm install -g rtlcss
 
-# Install Odoo
+
+# Crear estructura de carpetas
+RUN adduser --system --quiet --shell=/bin/bash --no-create-home --gecos 'ODOO' --group odoo
+RUN mkdir -p /opt/odoo/extra-addons \
+    && mkdir -p /opt/odoo/data \
+    && mkdir -p /opt/odoo/src \
+    && mkdir -p /opt/odoo/config \
+    && chown -R odoo /opt/odoo
+
+#Configurar Git
+RUN git config --global user.name "Eladio Garcia"
+RUN git config --global user.email eladio77@gmail.com
+
+# Bajar fuentes de Odoo
 ENV ODOO_VERSION 14.0
-ARG ODOO_RELEASE=20210728
-ARG ODOO_SHA=9e4ba128935f9fdaca61965472248fedbebf62d3
-RUN curl -o odoo.deb -sSL http://nightly.odoo.com/${ODOO_VERSION}/nightly/deb/odoo_${ODOO_VERSION}.${ODOO_RELEASE}_all.deb \
-    && echo "${ODOO_SHA} odoo.deb" | sha1sum -c - \
-    && apt-get update \
-    && apt-get -y install --no-install-recommends ./odoo.deb \
-    && rm -rf /var/lib/apt/lists/* odoo.deb
-
-# Copy entrypoint script and Odoo configuration file
-COPY ./entrypoint.sh /
-COPY ./odoo.conf /etc/odoo/
-
-# Set permissions and Mount /var/lib/odoo to allow restoring filestore and /mnt/extra-addons for users addons
-RUN chown odoo /etc/odoo/odoo.conf \
-    && mkdir -p /mnt/extra-addons \
-    && chown -R odoo /mnt/extra-addons
-VOLUME ["/var/lib/odoo", "/mnt/extra-addons"]
+RUN git clone https://github.com/odoo/odoo.git -b $ODOO_VERSION --depth=1  /opt/odoo/src
 
 # Expose Odoo services
 EXPOSE 8069 8071 8072
 
-# Set the default config file
-ENV ODOO_RC /etc/odoo/odoo.conf
+# Install pip pack
+ENV CRYPTOGRAPHY_DONT_BUILD_RUST=1
+RUN pip3 install cryptography libsass geopy paramiko pyopenssl
 
+# Instalar dependencias Odoo
+RUN pip3 install -r /opt/odoo/src/requirements.txt 
+
+# Set default user when running container
+RUN ln -s /opt/odoo/src/odoo-bin /usr/bin/odoo
+RUN chown -R odoo: /opt/odoo
+
+# Copy entrypoint script and Odoo configuration file
+COPY ./odoo.conf /opt/odoo/config
+COPY ./entrypoint.sh /
+
+# Set permissions and Mount /var/lib/odoo to allow restoring filestore and /mnt/extra-addons for users addons
+RUN chown odoo /opt/odoo/config/odoo.conf 
+VOLUME ["/opt/odoo/data","/opt/odoo/extra-addons"]
+
+# Set default config file
+ENV ODOO_RC /opt/odoo/config/odoo.conf
 COPY wait-for-psql.py /usr/local/bin/wait-for-psql.py
 
 # Set default user when running the container
